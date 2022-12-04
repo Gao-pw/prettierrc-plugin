@@ -5,6 +5,40 @@ const traverse = require("@babel/traverse").default;
 const generate = require("@babel/generator").default;
 const types = require("@babel/types");
 
+class Strategy {
+  constructor() {
+    this.strategy_map = {};
+    this.cacheObject = {
+      none: [],
+      all: [],
+      multiple: [],
+      single: [],
+      else: [],
+    };
+  }
+  Registrator(ruleName, ruleFun, callback) {
+    if (ruleName in this.strategy_map) {
+      console.log(this.strategy_map[ruleName]);
+      return false;
+    }
+    this.strategy_map[ruleName] = { fun: ruleFun, callback };
+  }
+  Exec(node) {
+    let flag = false;
+    for (const key in this.strategy_map) {
+      if (this.strategy_map[key].fun(node)) {
+        this.strategy_map[key].callback(node);
+        flag = true;
+      }
+    }
+    if (!flag) {
+      return [true, 1];
+    } else {
+      return [false, 0];
+    }
+  }
+}
+
 const sort_base = (a, b) => {
   return getFileName(a) > getFileName(b)
     ? 1
@@ -131,7 +165,7 @@ function myPreprocessor(code, options) {
   // 获取所有的 import 语句
   const importNodes = [];
 
-  const cacheObject = {
+  var cacheObject = {
     none: [],
     all: [],
     multiple: [],
@@ -146,33 +180,69 @@ function myPreprocessor(code, options) {
     },
   });
 
-  importNodes.forEach((Node) => {
-    if (Node.specifiers.length === 0) {
-      cacheObject["none"] = sort_none(Node, cacheObject["none"]);
-    } else if (judge_multiple(Node)) {
-      if (Node.specifiers.length === 1) {
-        cacheObject["single"] = sort_single(Node, cacheObject["single"]);
-      } else {
-        cacheObject["multiple"] = sort_multiple(Node, cacheObject["multiple"]);
-      }
-    } else if (Node.specifiers.length === 1) {
-      if (judge_all(Node.specifiers[0])) {
-        cacheObject["all"] = sort_all(Node, cacheObject["all"]);
-      } else {
-        cacheObject["single"] = sort_single(Node, cacheObject["single"]);
-      }
-    } else {
-      cacheObject["else"].push(Node);
+  let strategy = new Strategy();
+
+  strategy.Registrator(
+    "none",
+    (Node) => Node.specifiers.length === 0,
+    (Node) => {
+      strategy.cacheObject["none"] = sort_none(
+        Node,
+        strategy.cacheObject["none"]
+      );
     }
+  );
+
+  strategy.Registrator(
+    "multiple",
+    (Node) => judge_multiple(Node) && Node.specifiers.length > 1,
+    (Node) => {
+      strategy.cacheObject["multiple"] = sort_multiple(
+        Node,
+        strategy.cacheObject["multiple"]
+      );
+    }
+  );
+
+  strategy.Registrator(
+    "all",
+    (Node) => Node.specifiers.length === 1 && judge_all(Node.specifiers[0]),
+    (Node) => {
+      strategy.cacheObject["all"] = sort_all(Node, strategy.cacheObject["all"]);
+    }
+  );
+
+  strategy.Registrator(
+    "single",
+    (Node) => {
+      return (
+        Node.specifiers.length === 1 &&
+        (judge_multiple(Node) || !judge_all(Node.specifiers[0]))
+      );
+    },
+    (Node) =>
+      (strategy.cacheObject["single"] = sort_single(
+        Node,
+        strategy.cacheObject["single"]
+      ))
+  );
+
+  importNodes.forEach((Node) => {
+    let [err, _] = strategy.Exec(Node);
+    if (err) strategy.cacheObject["else"].push(Node);
   });
 
   const newImports = [
-    ...cacheObject["none"],
-    ...cacheObject["all"],
-    ...cacheObject["multiple"],
-    ...cacheObject["single"],
-    ...cacheObject["else"],
+    ...strategy.cacheObject["none"],
+    ...strategy.cacheObject["all"],
+    ...strategy.cacheObject["multiple"],
+    ...strategy.cacheObject["single"],
+    ...strategy.cacheObject["else"],
   ];
+
+  if (newImports.length === 0) {
+    throw new Error("import 0 ");
+  }
 
   const newAST = types.file({
     type: "Program",
