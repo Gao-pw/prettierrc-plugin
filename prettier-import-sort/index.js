@@ -156,7 +156,7 @@ const judge_multiple = (currentNode) => {
   return FLAG;
 };
 
-function myPreprocessor(code, options) {
+function sortsImportSiroi(code, options) {
   const ast = parser.parse(code, {
     plugins: ["js", "jsx"],
     sourceType: "module",
@@ -164,14 +164,6 @@ function myPreprocessor(code, options) {
 
   // 获取所有的 import 语句
   const importNodes = [];
-
-  var cacheObject = {
-    none: [],
-    all: [],
-    multiple: [],
-    single: [],
-    else: [],
-  };
 
   traverse(ast, {
     ImportDeclaration(path) {
@@ -263,7 +255,7 @@ module.exports = {
   parsers: {
     babel: {
       ...babelParsers.babel,
-      preprocess: myPreprocessor,
+      preprocess: sortsImportSiroi,
     },
   },
 };
